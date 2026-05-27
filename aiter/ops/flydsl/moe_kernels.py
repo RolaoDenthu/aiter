@@ -1040,6 +1040,7 @@ def flydsl_moe_stage2(
     inter_dim_pad: int = 0,
     xcd_swizzle: int = 0,
     bias: Optional[torch.Tensor] = None,
+    needs_zero_init: bool = False,
 ) -> torch.Tensor:
     """Down-projection GEMM (MOE stage2). Supports atomic/reduce modes.
 
@@ -1110,7 +1111,8 @@ def flydsl_moe_stage2(
 
     target = out
     if not accumulate:
-        target = torch.empty(
+        alloc_fn = torch.zeros if needs_zero_init else torch.empty
+        target = alloc_fn(
             (token_num * topk * model_dim,),
             device=out.device,
             dtype=out.dtype,

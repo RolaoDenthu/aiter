@@ -446,6 +446,7 @@ def fused_moe_(
             # only for flydsl dsv4
             swiglu_limit=swiglu_limit,
             gate_mode=gate_mode,
+            expert_mask=expert_mask,
         )
 
 
@@ -806,6 +807,7 @@ def _flydsl_stage2_wrapper(
     a2_scale=None,
     sorted_weights=None,
     bias2=None,
+    needs_zero_init=False,
     **_kwargs,
 ):
 
@@ -835,6 +837,7 @@ def _flydsl_stage2_wrapper(
         persist=parsed.get("persist", None),
         bias=bias2,
         xcd_swizzle=parsed.get("xcd_swizzle", 0),
+        needs_zero_init=needs_zero_init,
     )
 
 
@@ -1488,6 +1491,7 @@ def fused_moe_2stages(
     topk_weights=None,
     swiglu_limit=0.0,
     gate_mode=GateMode.SEPARATED.value,
+    expert_mask=None,
 ):
     quant_func = get_quant(quant_type)
     gate_mode = GateMode(gate_mode)
@@ -1704,6 +1708,13 @@ def fused_moe_2stages(
         )
         a2 = a2.view(token_num, topk, inter_dim)
 
+    # EP path: flydsl _reduce stage2 leaves non-local (token, topk_idx) slots
+    # uninitialized in its scratch buffer, which then pollute the final
+    # torch.sum. Signal the wrapper to zero-init the scratch.
+    if expert_mask is not None:
+        stage2_func = getattr(metadata.stage2, "func", metadata.stage2)
+        if stage2_func is _flydsl_stage2_wrapper:
+            extra_stage2_args["needs_zero_init"] = True
     metadata.stage2(
         a2,
         w1,
